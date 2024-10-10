@@ -104,8 +104,8 @@ namespace geode::utils::string {
     }
 }
 
-#include  <random>
-#include  <iterator>
+#include <random>
+#include <iterator>
 namespace geode::utils {
     template<typename Iter, typename RandomGenerator>
     Iter select_randomly(Iter start, Iter end, RandomGenerator& g) {
@@ -119,22 +119,11 @@ namespace geode::utils {
         static std::mt19937 gen(rd());
         return select_randomly(start, end, gen);
     }
-    std::string get_module_name(HMODULE mod) {
-        char buffer[MAX_PATH];
-        if (!mod || !GetModuleFileNameA(mod, buffer, MAX_PATH))
-            return "Unknown";
-        return std::filesystem::path(buffer).filename().string();
-    }
     std::string format_addr(void* addr) {
-        HMODULE mod;
-
-        if (!GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-            GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-            reinterpret_cast<char*>(addr), &mod))
-            mod = NULL;
+        //////////TODO//TODO//TODO//TODO//TODO//TODO
 
         std::stringstream stream;
-        stream << get_module_name(mod) << "." << reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(addr) - reinterpret_cast<uintptr_t>(mod));
+        stream << reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(addr) - geode::base::get());
         return stream.str();
     }
 };

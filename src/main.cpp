@@ -104,7 +104,7 @@ void RenderNodeProperties(CCNode* node) {
 		return;
 	}
 	ImGui::SameLine();
-	bool R = (GetAsyncKeyState(0x52) & 0x8000);
+	bool R = (ImGui::IsKeyDown(ImGuiKey::ImGuiKey_R));
 	if (ImGui::Button("Reset All") or R) {
 		//node->setAnchorPoint(OldAnchorPoint);
 		//node->setPosition(OldPosition);
