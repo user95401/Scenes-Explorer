@@ -87,6 +87,25 @@ namespace geode::cocos {
         if (!node) log::warn("FAILED TO FIND DATA NODE! id: {}", id);
         return node;
     }
+    class CCLambdaAction : public CCActionInstant {
+    public:
+        std::function<void()> m_callback;
+        CCLambdaAction() {};
+        virtual ~CCLambdaAction() {};
+        virtual void update(float time) {
+            m_callback();
+        };
+        static CCLambdaAction* create(std::function<void()>&& callback) {
+            auto ret = new (std::nothrow) CCLambdaAction();
+            if (ret) {
+                ret->m_callback = std::forward<std::remove_reference_t<decltype(callback)>>(callback);
+                ret->autorelease();
+                return ret;
+            }
+            delete ret;
+            return nullptr;
+        };
+    };
 };
 
 namespace geode::utils::string {

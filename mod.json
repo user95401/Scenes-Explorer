@@ -6,6 +6,7 @@
 		"mac": "2.206",
 		"ios": "2.206"
 	},
+	"early-load": true,
 	"id": "user95401.scenes_explorer",
 	"name": "Scenes Explorer",
 	"version": "v1.0.0-beta.1",
@@ -16,5 +17,14 @@
 		"community": "https://discord.gg/6SxAbk3bTA",
 		"homepage": "https://t.me/user95401_channel/6",
 		"source": "https://github.com/user95401/Scenes-Explorer"
+	},
+	"resources": {
+		"files": [ "assets/**/*" ]
+	},
+	"settings": {
+		"hi": {
+			"type": "title",
+			"name": "hi"
+		}
 	}
 }

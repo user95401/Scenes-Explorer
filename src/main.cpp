@@ -1,29 +1,27 @@
 #include <_main.hpp>
 #include <_imgui.hpp>
 
-auto IniFile = fs::path(getMod()->getSaveDir() / "imgui.ini");
+Ref<CCNodeRGBA> ImGuiHelperNode;
 
 auto Setup() {
-	ImGui::GetIO().IniFilename = IniFile.string().c_str();
+	
+	ImGuiHelperNode = CCNodeRGBA::create();
+	ImGuiHelperNode->setOpacity(ImGui::GetStyle().Alpha * 255);
 
 	auto& io = ImGui::GetIO();
-	io.FontDefault = io.Fonts->AddFontFromFileTTF(
-		CCFileUtils::get()->fullPathForFilename("consolas.ttf", 0).c_str(),
-		24
-	);
-	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavNoCaptureKeyboard;
+	auto FontFile = getMod()->getResourcesDir() / "consolas.ttf";
+	if (fs::exists(FontFile)) io.FontDefault = io.Fonts->AddFontFromFileTTF(FontFile.string().c_str(), 24);
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	io.ConfigFlags |= ImGuiConfigFlags_NavNoCaptureKeyboard;
 	io.NavActive = true;
 	io.NavVisible = true;
 	io.FontAllowUserScaling = true;
-	io.BackendFlags = true;
-
-	static auto IniFileStr = std::string(IniFile.string());
-	io.IniFilename = IniFileStr.c_str();
 
 	auto& style = ImGui::GetStyle();
 	style.WindowTitleAlign = ImVec2(0.0f, 0.5f);
 	style.WindowBorderSize = 2.5;
 	style.ColorButtonPosition = ImGuiDir_Left;
+	style.FramePadding = { 6.f, 6.f };
 
 	ImVec4* colors = ImGui::GetStyle().Colors;
 	colors[ImGuiCol_ChildBg] = ImVec4(0.00f, 0.00f, 0.00f, 0.34f);
@@ -34,7 +32,7 @@ auto Setup() {
 	ImGui::GetStyle().GrabMinSize = 30.f;
 	ImGui::GetStyle().ItemSpacing = { 16.f, 16.f };
 	ImGui::GetStyle().FramePadding = { 12.f, 10.f };
-	io.ConfigFlags |= ImGuiConfigFlags_IsTouchScreen;
+	//io.ConfigFlags |= ImGuiConfigFlags_IsTouchScreen;
 #endif
 
 }
@@ -55,24 +53,38 @@ namespace Tabs {
 
 void RenderNodeTree(CCNode* node, unsigned int index = 0) {
 	if (!node) return;
+
 	std::stringstream stream;
 	stream << "[" << index << "] " << getNodeName(node);
-	if (node->getTag() != -1)
-		stream << " (" << node->getTag() << ")";
-	const auto children_count = node->getChildrenCount();
-	if (children_count)
-		stream << " {" << children_count << "}";
+	if (node->getID().size() > 0) stream << " \"" << node->getID() << "\"";
+	if (node->getTag() != -1) stream << " (" << node->getTag() << ")";
+	if (node->getChildrenCount()) stream << " {" << node->getChildrenCount() << "}";
 
 	auto flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_SpanFullWidth;
+	
 	if (SelectedNode == node) {
 		flags |= ImGuiTreeNodeFlags_Selected;
 		ReachedSelectedNode = true;
 	}
-	if (node->getChildrenCount() == 0)
+	if (node->getChildrenCount() == 0) {
 		flags |= ImGuiTreeNodeFlags_Leaf;
+	}
 
-	ImGui::PushStyleColor(ImGuiCol_Text, node->isVisible() ? ImVec4{ 1.f, 1.f, 1.f, 1.f } : ImVec4{ 0.8f, 0.8f, 0.8f, 1.f });
+	flags |= ImGuiTreeNodeFlags_OpenOnArrow;
+	flags |= ImGuiTreeNodeFlags_OpenOnDoubleClick;
+
+	auto TextColor = ImGui::GetStyle().Colors[ImGuiCol_Text];
+	auto TextColorDark = TextColor; TextColorDark.w = 0.8;
+	auto TextColorDarker = TextColor; TextColorDarker.w = 0.6;
+	auto TextColorToPush = TextColor;
+	TextColorToPush = cocos::nodeIsVisible(node) ? TextColorToPush : TextColorDark;
+	TextColorToPush = node->isVisible() ? TextColorToPush : TextColorDarker;
+	ImGui::PushStyleColor(ImGuiCol_Text, TextColorToPush);
+
 	const bool is_open = ImGui::TreeNodeEx(node, flags, "%s", stream.str().data());
+
+	HoveredNode = ImGui::IsItemHovered() ? node : HoveredNode;
+
 	if (ImGui::IsItemClicked()) {
 		if (node == SelectedNode) {
 			SelectedNode = nullptr;
@@ -84,16 +96,15 @@ void RenderNodeTree(CCNode* node, unsigned int index = 0) {
 			ReachedSelectedNode = true;
 		}
 	}
-	if (ImGui::IsItemHovered())
-		HoveredNode = node;
+
 	if (is_open) {
-		auto children = node->getChildren();
-		for (unsigned int i = 0; i < children_count; ++i) {
-			auto child = children->objectAtIndex(i);
+		for (unsigned int i = 0; i < node->getChildrenCount(); ++i) {
+			auto child = node->getChildren()->objectAtIndex(i);
 			RenderNodeTree(static_cast<CCNode*>(child), i);
 		}
 		ImGui::TreePop();
 	}
+
 	ImGui::PopStyleColor();
 }
 
@@ -230,14 +241,88 @@ void RenderNodeProperties(CCNode* node) {
 	}
 }
 
+//DevTools
+enum class HighlightMode {
+	Selected,
+	Hovered,
+	Layout,
+};
+void DrawHighlight(CCNode* node, HighlightMode mode) {
+	auto& background = *ImGui::GetBackgroundDrawList();
+	auto parent = node->getParent();
+	auto bounding_box = node->boundingBox();
+	CCPoint bb_min(bounding_box.getMinX(), bounding_box.getMinY());
+	CCPoint bb_max(bounding_box.getMaxX(), bounding_box.getMaxY());
+
+#ifdef GEODE_IS_WINDOWS
+	auto cameraParent = node;
+	while (cameraParent) {
+		auto camera = cameraParent->getCamera();
+
+		float off_x, off_y, off_z;
+		camera->getEyeXYZ(&off_x, &off_y, &off_z);
+		const CCPoint offset(off_x, off_y);
+		bb_min -= offset;
+		bb_max -= offset;
+
+		cameraParent = cameraParent->getParent();
+	}
+#endif
+
+	auto min = toVec2(parent ? parent->convertToWorldSpace(bb_min) : bb_min);
+	auto max = toVec2(parent ? parent->convertToWorldSpace(bb_max) : bb_max);
+
+	auto wsize = ImGui::GetMainViewport()->Size;
+
+	auto anchor = ImVec2(
+		node->getAnchorPoint().x * (max.x - min.x) + min.x,
+		node->getAnchorPoint().y * (max.y - min.y) + min.y
+	);
+
+	switch (mode) {
+	case HighlightMode::Selected: {
+		background.AddRect(
+			min, max, IM_COL32(0, 255, 55, 155),
+			0.f, 0, 3.f
+		);
+		background.AddCircleFilled(
+			anchor, 7.5f, IM_COL32(255, 75, 105, 255)
+		);
+		background.AddCircleFilled(
+			anchor, 5.f, IM_COL32(255, 255, 255, 255)
+		);
+		if (auto layout = typeinfo_cast<AxisLayout*>(node->getLayout())) {
+			//drawLayoutArrows(background, layout, tmax, tmin);
+		}
+	} break;
+
+	case HighlightMode::Layout: {
+		background.AddRect(
+			min, max, IM_COL32(255, 155, 55, 255),
+			0.f, 0, 4.f
+		);
+		// built-in Geode layouts get special extra markings
+		if (auto layout = typeinfo_cast<AxisLayout*>(node->getLayout())) {
+			//drawLayoutArrows(background, layout, tmax, tmin);
+		}
+	} break;
+
+	default:
+	case HighlightMode::Hovered: {
+		background.AddRectFilled(
+			min, max, IM_COL32(0, 255, 55, 70)
+		);
+	} break;
+
+	}
+}
+
 auto Draw() {
 
 	auto& io = ImGui::GetIO();
 	auto& style = ImGui::GetStyle();
 
-	//update by settings
-	io.FontGlobalScale = getMod()->getSavedValue("ImGui.FontGlobalScale", io.FontGlobalScale);
-
+	if (io.NavVisible) io.WantCaptureKeyboard = true;
 
 	if (ImGui::Begin("Scenes Explorer", nullptr, ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_MenuBar)) {
 
@@ -263,10 +348,11 @@ auto Draw() {
 		if (Tabs::Tree) {
 			ImGui::BeginChild("explorer.tree", ImVec2(ImGui::GetContentRegionAvail().x * 0.5f, 0), ImGuiChildFlags_ResizeX, ImGuiWindowFlags_HorizontalScrollbar); {
 
-				CCNode* node = CCScene::get();
+				CCNode* node = CCDirector::get()->m_pRunningScene;
 				if (node) {
 					ReachedSelectedNode = false;
 					RenderNodeTree(node);
+					RenderNodeTree(ImGuiHelperNode);
 				}
 			};
             ImGui::EndChild();
@@ -299,7 +385,11 @@ auto Draw() {
 			ImGui::EndChild();
 		}
 
-	} ImGui::End();
+	} 
+	ImGui::End();
+
+	if (HoveredNode and HoveredNode->isRunning()) DrawHighlight(HoveredNode, HighlightMode::Hovered);
+	if (SelectedNode and SelectedNode->isRunning()) DrawHighlight(SelectedNode, HighlightMode::Selected);
 
 	ImGui::Begin("Dear ImGui Style Editor"); {
 		ImGui::ShowStyleEditor();
@@ -307,15 +397,47 @@ auto Draw() {
 	ImGui::End();
 
 	ImGui::ShowMetricsWindow();
+
+	//update by settings
+	io.FontGlobalScale = getMod()->getSavedValue("ImGui.FontGlobalScale", io.FontGlobalScale);
+
+	ImGui::GetStyle().Alpha = ImGuiHelperNode->getOpacity() / 255;
 }
 
-inline auto ModLoaded() {
-    auto ew = &ImGuiCocos::get();
-    ew->setup([]() { Setup(); });
-    ew->draw([]() { Draw(); });
-    ew->setVisible(1);//SETTING(bool, "Visible"));
-}
-
-$on_mod(Loaded) {
-	ModLoaded();
-}
+#include <Geode/modify/CCScene.hpp>
+class $modify(ScenesExplorerLoader, CCScene) {
+	inline static auto pImGuiCocos = &ImGuiCocos::get();
+	inline static auto Loaded = false;
+	inline static auto TryLoad() {
+		if (Loaded) return; else Loaded = true;
+		pImGuiCocos->setup([]() { Setup(); });
+		pImGuiCocos->draw([]() { Draw(); });
+		pImGuiCocos->setVisible(1);//SETTING(bool, "Visible"));
+	}
+	$override static CCScene* create(void) {
+		auto __this = CCScene::create();
+		TryLoad();
+		//scroll
+		auto size = CCDirector::get()->getVisibleSize();
+		size.width = 120.f;
+		auto scroll = CCScrollView::create(size);
+		scroll->runAction(CCRepeatForever::create(CCSpawn::create(CCLambdaAction::create(
+			[scroll]() {
+				if (scroll->getContainer()->getPositionX() > 50.f) {
+					pImGuiCocos->setVisible(1);
+					scroll->getContainer()->setPositionX(0.f);
+					scroll->setTouchEnabled(0);
+					scroll->setTouchEnabled(1);
+				}
+				if (scroll->getContainer()->getPositionX() < -50.f) {
+					pImGuiCocos->setVisible(0);
+					scroll->getContainer()->setPositionX(0.f);
+					scroll->setTouchEnabled(0);
+					scroll->setTouchEnabled(1);
+				}
+			}
+		), nullptr)));
+		__this->addChild(scroll);
+		return __this;
+	}
+};
